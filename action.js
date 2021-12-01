@@ -6,6 +6,7 @@ const action = async () => {
     const reportPaths = core.getInput('report_paths').split(',').join('\n');
     core.info(`Going to parse results form ${reportPaths}`);
     const githubToken = core.getInput('github_token');
+    const createCheck = (core.getInput('create_check') || 'true') === 'true';
     const name = core.getInput('check_name');
     const commit = core.getInput('commit');
     const failOnFailedTests = core.getInput('fail_on_test_failures') === 'true';
@@ -29,27 +30,66 @@ const action = async () => {
         const link = (pullRequest && pullRequest.html_url) || github.context.ref;
         const status = 'completed';
         const head_sha = commit || (pullRequest && pullRequest.head.sha) || github.context.sha;
-        core.info(
-            `Posting status '${status}' with conclusion '${conclusion}' to ${link} (sha: ${head_sha})`
-        );
 
-        const createCheckRequest = {
-            ...github.context.repo,
-            name,
-            head_sha,
-            status,
-            conclusion,
-            output: {
-                title,
-                summary: '',
-                annotations: annotations.slice(0, 50)
+        const octokit = github.getOctokit(githubToken);
+        if (createCheck) {
+            core.info(`Posting status '${status}' with conclusion '${conclusion}' to ${link} (sha: ${head_sha})`);
+            const createCheckRequest = {
+                ...github.context.repo,
+                name,
+                head_sha,
+                status,
+                conclusion,
+                output: {
+                    title,
+                    summary: '',
+                    annotations: annotations.slice(0, 50)
+                }
+            };
+
+            core.debug(JSON.stringify(createCheckRequest, null, 2));
+
+            await octokit.rest.checks.create(createCheckRequest);
+        } else {
+            const { data: {check_runs: check_runs} } = await octokit.rest.checks.listForRef({
+                ...github.context.repo,
+                check_name: github.context.job,
+                ref: head_sha,
+                status: 'in_progress'
+            })
+            core.debug(JSON.stringify(check_runs, null, 2));
+            if (check_runs.length == 0) {
+                core.setFailed(`Did not find any in progress '${github.context.job}' check for sha ${head_sha}`);
             }
-        };
+            let check_run = {}
+            if (!pullRequest) {
+                if (check_runs.length != 1) {
+                    core.setFailed(`Found multiple in progress '${github.context.job}' check for sha ${head_sha}`);
+                    return;
+                }
+                check_run = check_runs[0];
+            } else {
+                check_run = check_runs.find(element => element.pull_requests.some(pr => pr.id == pullRequest.id));
+                if (!check_run) {
+                    core.setFailed(`Did not find any in progress '${github.context.job}' check for sha ${head_sha} and PR ${pullRequest.id}`);
+                    return;
+                }
+            }
+            core.info(`Patching '${github.context.job}' for ${link} (sha: ${head_sha})`);
+            const updateCheckRequest = {
+                ...github.context.repo,
+                check_run_id: check_run.id,
+                output: {
+                    title: check_run.output.title || title,
+                    summary: check_run.output.summary || '',
+                    annotations: annotations.slice(0, 50)
+                }
+            };
 
-        core.debug(JSON.stringify(createCheckRequest, null, 2));
+            core.debug(JSON.stringify(updateCheckRequest, null, 2));
 
-        const octokit = new github.GitHub(githubToken);
-        await octokit.checks.create(createCheckRequest);
+            await octokit.rest.checks.update(updateCheckRequest);
+        }
     } else {
         core.info('Not publishing test result due to skip_publishing=true');
     }
