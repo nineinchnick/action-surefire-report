@@ -56,29 +56,21 @@ const action = async () => {
         } else {
             const { data: {check_runs: check_runs} } = await octokit.rest.checks.listForRef({
                 ...github.context.repo,
-                check_name: github.context.job,
+                check_name: name,
                 ref: head_sha,
                 status: 'in_progress'
             })
             core.debug(JSON.stringify(check_runs, null, 2));
             if (check_runs.length == 0) {
-                core.setFailed(`Did not find any in progress '${github.context.job}' check for sha ${head_sha}`);
+                core.setFailed(`Did not find any in progress '${name}' check for sha ${head_sha}`);
+                return;
             }
-            let check_run = {}
-            if (!pullRequest) {
-                if (check_runs.length != 1) {
-                    core.setFailed(`Found multiple in progress '${github.context.job}' check for sha ${head_sha}`);
-                    return;
-                }
-                check_run = check_runs[0];
-            } else {
-                check_run = check_runs.find(element => element.pull_requests.some(pr => pr.id == pullRequest.id));
-                if (!check_run) {
-                    core.setFailed(`Did not find any in progress '${github.context.job}' check for sha ${head_sha} and PR ${pullRequest.id}`);
-                    return;
-                }
+            if (check_runs.length != 1) {
+                core.setFailed(`Found multiple in progress '${name}' checks for sha ${head_sha}`);
+                return;
             }
-            core.info(`Patching '${github.context.job}' for ${link} (sha: ${head_sha})`);
+            const check_run = check_runs[0];
+            core.info(`Patching '${name}' check for ${link} (sha: ${head_sha})`);
             const updateCheckRequest = {
                 ...github.context.repo,
                 check_run_id: check_run.id,

@@ -192,6 +192,7 @@ describe('action should work', () => {
     describe('with option create_check=false', () => {
         it('should parse surefire reports and update a check run', async () => {
             inputs.create_check = 'false';
+            inputs.check_name = 'build';
             github.context.sha = 'sha123';
             github.context.job = 'build'
 
